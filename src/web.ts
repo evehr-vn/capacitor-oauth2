@@ -33,6 +33,62 @@ export class OAuth2ClientPluginWeb extends WebPlugin implements OAuth2ClientPlug
             } else if (!this.webOptions.responseType || this.webOptions.responseType.length == 0) {
                 reject(new Error("ERR_PARAM_NO_RESPONSE_TYPE"));
             } else {
+                if(this.webOptions.windowTarget !== "_self"){
+                    // Try parse authorization response
+                    let href = window.location.href; 
+
+                    if (this.webOptions.logsEnabled) {
+                        this.doLog("Url from Provider: " + href);
+                    }
+                    let authorizationRedirectUrlParamObj = WebUtils.getUrlParams(href);
+                    if (authorizationRedirectUrlParamObj) {
+                        if (this.webOptions.logsEnabled) {
+                            this.doLog("Authorization response:", authorizationRedirectUrlParamObj);
+                        }
+                        // check state
+                        if (authorizationRedirectUrlParamObj.state === this.webOptions.state) {
+                            if (this.webOptions.accessTokenEndpoint) {
+                                const self = this;
+                                let authorizationCode = authorizationRedirectUrlParamObj.code;
+                                if (authorizationCode) {
+                                    const tokenRequest = new XMLHttpRequest();
+                                    tokenRequest.onload = function () {
+                                        if (this.status === 200) {
+                                            let accessTokenResponse = JSON.parse(this.response);
+                                            if (self.webOptions.logsEnabled) {
+                                                self.doLog("Access token response:", accessTokenResponse);
+                                            }
+                                            self.requestResource(accessTokenResponse.access_token, resolve, reject, authorizationRedirectUrlParamObj, accessTokenResponse);
+                                        }
+                                    };
+                                    tokenRequest.onerror = function () {
+                                        // always log error because of CORS hint
+                                        self.doLog("ERR_GENERAL: See client logs. It might be CORS. Status text: " + this.statusText);
+                                        reject(new Error("ERR_GENERAL"));
+                                    };
+                                    tokenRequest.open("POST", this.webOptions.accessTokenEndpoint, true);
+                                    tokenRequest.setRequestHeader('accept', 'application/json');
+                                    tokenRequest.setRequestHeader('cache-control', 'no-cache');
+                                    tokenRequest.setRequestHeader('content-type', 'application/x-www-form-urlencoded');
+                                    tokenRequest.send(WebUtils.getTokenEndpointData(this.webOptions, authorizationCode));
+                                } else {
+                                    reject(new Error("ERR_NO_AUTHORIZATION_CODE"));
+                                }
+                                // this.closeWindow();
+                            } else {
+                                // if no accessTokenEndpoint exists request the resource
+                                this.requestResource(authorizationRedirectUrlParamObj.access_token, resolve, reject, authorizationRedirectUrlParamObj);
+                            }
+                        } else {
+                            if (this.webOptions.logsEnabled) {
+                                this.doLog("State from web options: " + this.webOptions.state);
+                                this.doLog("State returned from provider: " + authorizationRedirectUrlParamObj.state);
+                            }
+                            reject(new Error("ERR_STATES_NOT_MATCH"));
+                            // this.closeWindow();
+                        }
+                    }
+                }
                 // init internal control params
                 let loopCount = this.loopCount;
                 this.windowClosedByPlugin = false;
